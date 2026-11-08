@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chiller Control</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%233b82f6'/></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="dot" id="linkDot"></span>
+    <div>
+      <h1>Lydall Chiller</h1>
+      <div class="sub" id="linkText">Disconnected</div>
+    </div>
+  </div>
+  <div class="conn">
+    <select id="portSelect" aria-label="Serial port"></select>
+    <button id="refreshPorts" class="ghost" title="Rescan serial ports" aria-label="Rescan serial ports">↻</button>
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" class="ghost">Disconnect</button>
+    <div class="seg" role="group" aria-label="Units">
+      <button data-unit="C" class="on">°C</button><button data-unit="F">°F</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="banner" class="banner" hidden></div>
+
+  <section class="readouts">
+    <div class="card big">
+      <div class="label">Process temperature</div>
+      <div class="value" id="pv">—</div>
+      <div class="foot" id="pvFoot">&nbsp;</div>
+    </div>
+    <div class="card">
+      <div class="label">Setpoint</div>
+      <div class="value mid" id="sp">—</div>
+      <div class="foot" id="spFoot">&nbsp;</div>
+    </div>
+    <div class="card">
+      <div class="label">Error (PV − SP)</div>
+      <div class="value mid" id="err">—</div>
+      <div class="foot">&nbsp;</div>
+    </div>
+    <div class="card">
+      <div class="label">Heater output (PID)</div>
+      <div class="value mid" id="out">—</div>
+      <div class="bar"><div id="outBar"></div></div>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <div class="cardhead">
+        <h2>Temperature history</h2>
+        <div class="seg small" id="spanSeg" role="group" aria-label="Time span">
+          <button data-span="300">5m</button><button data-span="1800" class="on">30m</button><button data-span="7200">2h</button><button data-span="21600">6h</button>
+        </div>
+      </div>
+      <canvas id="chart" height="280"></canvas>
+      <div class="legend">
+        <span><i class="sw pv"></i>PV</span><span><i class="sw sp"></i>Setpoint</span><span><i class="sw out"></i>Heater % (right axis)</span>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <h2>Setpoint</h2>
+        <form id="spForm" class="spform">
+          <button type="button" class="ghost step" data-step="-1" aria-label="Decrease">−</button>
+          <input id="spInput" type="number" step="0.1" inputmode="decimal" aria-label="New setpoint">
+          <span class="unit" data-unit-label>°C</span>
+          <button type="button" class="ghost step" data-step="1" aria-label="Increase">+</button>
+          <button type="submit" id="spApply">Apply</button>
+        </form>
+        <div class="hint" id="spHint"></div>
+        <div class="hint muted">Writes the chiller's EEPROM config (J command), then reads it back to verify. Run/stop is not possible over serial; it is controlled by the hardware <b>REMOTE</b> input.</div>
+      </div>
+
+      <div class="card">
+        <h2>Inputs</h2>
+        <div class="lamps" id="lamps"></div>
+        <div class="rawline" id="optoRaw"></div>
+      </div>
+
+      <div class="card">
+        <h2>Faults</h2>
+        <div class="lamps" id="faultLamps"></div>
+        <div class="hint muted">Faults latch until REMOTE is removed (RTD fault self-clears).</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="simCard" hidden>
+    <div class="cardhead"><h2>Simulator</h2><span class="tag">not a real chiller</span></div>
+    <div class="simrow">
+      <button id="simRemote" class="ghost">Toggle REMOTE</button>
+      <select id="simFault" aria-label="Fault to inject"></select>
+      <button id="simInject" class="ghost">Inject condition</button>
+      <button id="simClear" class="ghost">Clear conditions</button>
+      <span class="muted" id="simInfo"></span>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <details class="card" id="advanced">
+      <summary><h2>PID &amp; configuration</h2></summary>
+      <table class="kv" id="pidTable"></table>
+      <h3>Config block (I)</h3>
+      <p class="warn">These parameters are written to EEPROM. The chiller firmware does <b>no</b> range checking, and bad values can stop it from regulating. Record the current values before changing anything.</p>
+      <form id="cfgForm"><table class="kv" id="cfgTable"></table>
+        <button type="submit" id="cfgApply">Write config…</button>
+        <button type="button" id="cfgRevert" class="ghost">Revert edits</button>
+      </form>
+      <table class="kv" id="sysTable"></table>
+    </details>
+
+    <div class="stack">
+      <details class="card">
+        <summary><h2>Raw console</h2></summary>
+        <form id="rawForm" class="rawform">
+          <select id="rawCmd" aria-label="Command"></select>
+          <button type="submit">Send</button>
+        </form>
+        <pre id="rawOut" class="console"></pre>
+      </details>
+      <div class="card">
+        <h2>Event log</h2>
+        <ul class="events" id="events"></ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="confirmDlg">
+  <form method="dialog">
+    <h3 id="confirmTitle">Confirm</h3>
+    <div id="confirmBody"></div>
+    <div class="dlgbtns">
+      <button value="cancel" class="ghost">Cancel</button>
+      <button value="ok" id="confirmOk">Write</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
